@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 Created on Fri Feb 24 10:34:20 2017
-
 @author: Eric
 """
 
 
 import sys
 from subprocess import call
-from csv import reader
+import csv
 from contextlib import contextmanager
 import os
 
@@ -36,7 +35,7 @@ def Kallisto():
 
     makeConfigFile(str(file_path))
     ConfigFile=file_path+"/Trimmed_filenames.csv"
-    csv_reader = reader(open(ConfigFile,"r"), quotechar="\"")
+    csv_reader = csv.reader(open(ConfigFile,"r"), quotechar="\"")
 
     list_files =[]
     for row in csv_reader:
