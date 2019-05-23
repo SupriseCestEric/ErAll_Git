@@ -5,8 +5,7 @@ Created on Fri Feb 24 10:34:20 2017
 @author: Eric
 """
 #This script requires a download_config.txt file with one line, comma 
-seperated SRR identifiers. It will download all SRA files and dump fastq 
-files. 
+#seperated SRR identifiers. It will download all SRA files and dump fastq files. 
 
 from subprocess import call
 from csv import reader
