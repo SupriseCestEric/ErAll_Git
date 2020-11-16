@@ -78,6 +78,8 @@ tf_activities <- run_viper(f_counts, regulons,
 
 write.table(tf_activities, file = "LL100_dorothea_TF_activity.txt", sep = "\t", quote = F)
 
+subj <- tf_activities[rownames(tf_activities)=="IRF1",]
+cor.test(UGT2B17, subj ,method = "spearman")
 
 #visualize PCA
 svd1<-svd(t(tf_activities))
