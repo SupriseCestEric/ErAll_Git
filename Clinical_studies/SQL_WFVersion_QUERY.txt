@@ -1,0 +1,14 @@
+SELECT 
+	CallData.genotype, 
+	CallData.geno_qual, 
+	CallData.pass_filter, 
+	CallData.afreq, 
+	CallData.coverage, 
+	CallData.norm_count, 
+	CallData.sample,
+	VarData.name,
+	RunInfo.IonWF_version
+FROM 
+	CallData 
+	JOIN VarData ON VarData.id = CallData.variant
+	JOIN RunInfo ON RunInfo.id = CallData.sample
