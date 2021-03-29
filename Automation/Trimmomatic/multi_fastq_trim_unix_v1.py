@@ -67,7 +67,7 @@ def Trim():
                 RP='%s_RV_P.fq.gz' % RV
                 Adapt = 'ILLUMINACLIP:'+"../"+adapt_file+':1:30:10'
                 print(Adapt) #test
-                call(['java','-jar','../trimmomatic-0.36.jar','PE','-phred33','-threads','8',pFW,pRV,FUP,FP,RUP,RP,Adapt,'SLIDINGWINDOW:4:20','MINLEN:20'])
+                call(['java','-jar','../trimmomatic-0.36.jar','PE','-phred33','-threads','8',pFW,pRV,FP,FUP,RP,RUP,Adapt,'SLIDINGWINDOW:4:20','MINLEN:20'])
             x+=2
 
 Trim()
