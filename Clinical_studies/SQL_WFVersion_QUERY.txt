@@ -1,3 +1,9 @@
+#To Add Files
+for i in $(ls HD200_v5.6_transfer/*.vcf); do python3 Add_to_DB_v3.py -i $i; done &
+
+
+#In SQL
+
 SELECT 
 	CallData.genotype, 
 	CallData.geno_qual, 
@@ -12,3 +18,11 @@ FROM
 	CallData 
 	JOIN VarData ON VarData.id = CallData.variant
 	JOIN RunInfo ON RunInfo.id = CallData.sample
+
+
+#Using bash
+mysql -u ***REMOVED*** -p -e "USE ***REMOVED***; SELECT  CallData.genotype,  CallData.geno_qual,  CallData.pass_filter,  CallData.afreq,  CallData.coverage,  CallData.norm_count,  CallData.sample, VarData.name, RunInfo.IonWF_version FROM  CallData  JOIN VarData ON VarData.id = CallData.variant JOIN RunInfo ON RunInfo.id = CallData.sample;" > hd200v5_compare.txt
+
+
+#For Backup
+mysqldump -u ***REMOVED*** -p ***REMOVED*** > hd200_20210503.sql
