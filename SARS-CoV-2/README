@@ -34,6 +34,6 @@ Be wary of the trailing backslash (YYMMDD/), which will not work if present.
 
 ## Transfering to NML
 
-Finally, data is transfered to NML using the azure script provided by Winnipeg when all data has been revised for mistakes.
+Finally, data is transfered to NML using the azure script provided by Winnipeg when all data has been revised for errors.
 
 python /home/vitalite/NML_CanCOGeN_new-brunswick.py -u NML
