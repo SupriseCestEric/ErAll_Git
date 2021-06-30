@@ -1,0 +1,205 @@
+---
+title: "nCoV_dashboard_v0.1"
+author: "Eric Allain"
+date: "June 22, 2021"
+runtime: shiny
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    social: menu
+    theme: simplex
+
+---
+
+```{r setup, include=FALSE}
+library(shiny)
+library(leaflet) # devtools::install_github('rstudio/leaflet')
+library(highcharter) # devtools::install_github('jbkunst/highcharter')
+library(plotly) # devtools::install_github('ropensci/plotly')
+library(ggplot2) # devtools::install_github('hadley/ggplot2')
+library(sp)
+library(dplyr)
+library(flexdashboard) # devtools::install_github('rstudio/flexdashboard')
+library(rgeos)
+library(readr)
+library(ggthemes)
+library(viridis)
+library(VariantAnnotation)
+library(DT)
+library(data.table)
+library(shinyWidgets)
+library(stringi)
+library(Biostrings)
+
+#read in data 
+variant_info <- read.csv("supplemental_table_2.csv", header = F, sep = ",")
+names(variant_info) <- c("specimen", "variant", "feature", "AA-change", "type")
+variant_info$type <- as.factor(variant_info$type)
+variant_info$position <- stri_extract_first_regex(variant_info$variant, "^([0-9]+)")
+variant_info$position <- as.numeric(variant_info$position)
+starts = c(266,21563,25393,26245,26523,27202,27394,27894,28274,29558)
+ends = c(21555,25384,26220,26472,27191,27387,27887,28259,29533,29674)
+features = c("ORF1","S","ORF3","ORF4","ORF5","ORF6","ORF7","ORF8","ORF9","ORF10")
+ft <- data.frame(cbind(features,starts, ends))
+ft$features <- as.factor(ft$features)
+class(ft$starts) <- "numeric"
+class(ft$ends) <- "numeric"
+fa <- readDNAStringSet("sequence.fasta")
+fa <- paste(fa)
+
+
+
+working_obj <- reactive({
+  mat_0<- variant_info
+  return(mat_0)
+})
+
+
+var_obj <- reactive({
+  mat_1<-variant_info[!duplicated(variant_info$variant),]
+  return(mat_1)
+})
+
+ft_obj<- reactive({
+  mat_2<- ft
+  return(mat_2)
+})
+
+get_obj <- reactive({
+  mat_3 <- variant_info[rownames(variant_info) %in% Variants$sel_row,]
+  return(mat_3)
+})
+
+fa_obj<- reactive({
+  fa1<- fa
+  return(fa1)
+})
+
+```
+
+Sidebar {.sidebar}
+======================================================================
+
+```{r}
+#Define inputs
+selectInput('DataSet', label = 'Select a source', choices = c("Koyama et al"))
+
+#Set up data for download
+dwl<- reactive({
+  dat<- working_obj()
+})
+
+downloadHandler(
+  filename = 'nCoVData.csv', 
+  content = function(file) {
+    write_csv(dwl(), file)
+  }
+)
+downloadLink('downloadCSV', label = '  Download CSV')
+
+```
+
+Use the dropdown menus to choose a dataset of interest. This will generate graphs and tables based on the selected data. 
+
+
+Explore Genes
+======================================================================
+
+Row {data-height=600}
+----------------------------------------------------------------------
+
+```{r, fig.width=10, fig.height=7}
+# Here, we draw the variants table
+
+# This seems to work without the buttons
+# input$tableId_rows_selected stores the row ID of selected rows
+Variants <- reactiveValues()
+Variants$sel_row <- NULL
+
+
+
+
+DT::renderDataTable({
+      tb <- var_obj()
+      datatable(tb, selection = list(mode ='single', target = 'row', selected = 1, elementId="tb"), callback = JS("table.on('click.dt', 'td', function() {
+            var row_=table.cell(this).index().row;
+            var col=table.cell(this).index().column;
+            var rnd= Math.random();
+            var data = [row_, col, rnd];
+           Shiny.onInputChange('rows',data );
+    });")
+      )})
+observeEvent(input$rows, {
+      id<- names(input)[grep("rows_current", names(input))]
+      Variants$sel_row<-rownames(var_obj())[input[[id]][input$rows[1]+1]] # this gets the right object
+      print(Variants$sel_row)
+    })
+
+
+
+
+```
+
+Row {data-height=400}
+-----------------------------------------------------------------------
+
+
+```{r, fig.width=10, fig.height=4}
+
+
+renderPlotly({
+  df1 <- var_obj()
+  df2 <- ft_obj()
+  plt<-ggplot(df1, aes(x = position, colour = type, label = as.character(position))) + geom_freqpoly(binwidth=300)+theme_bw()
+  plt1<- ggplot(df2, aes(x =starts ,xend = ends,y = 0,yend=0)) + geom_segment(size = 100,aes(color = features))+    xlab("Coordinates (NC_045512.2)") + ylab("") + theme(axis.text = element_blank(), axis.ticks = element_blank(), panel.background = element_blank(), panel.grid = element_blank()) +guides(color=FALSE)
+  p <- ggplotly(plt, tooltip = c("count", "type"))
+  p1 <- ggplotly(plt1)
+  subplot(p, p1, nrows = 2, margin = 0.04, heights = c(0.85, 0.15))
+  })
+
+
+```
+
+Row {data-height=50}
+-----------------------------------------------------------------------
+
+```{r}
+empty_plot <- function(title = NULL){
+  p <- plotly_empty(type = "scatter", mode = "markers") %>%
+    config(
+      displayModeBar = FALSE
+    ) %>%
+    layout(
+      title = list(
+        text = title,
+        yref = "paper",
+        y = 0.8
+      )
+    )
+  return(p)
+} 
+renderPlotly({
+  if (nrow(var_obj())>0 & is.null(Variants$sel_row)){
+  empty_plot("No data selected")
+  } else {
+    df1<- get_obj()
+    fa <- fa_obj()
+    i = df1[1,6]#gets position, might change based on db
+      if (i < 25){
+        ss <- substr(fa,1,(i+25))
+        print(ss)
+        ss1<- paste(substr(ss,1,(i-1)),"-",substr(ss,i,i),"-", substr(ss,i,(i+25)), sep = "")
+        empty_plot(ss1)
+      }
+      else {
+        ss <- substr(fa,(i-25),(i+25))
+        ss1<- paste(substr(ss,1,25),"-",substr(ss,26,26),"-", substr(ss,27,51), sep = "")
+        empty_plot(ss1)
+      }
+  }
+  
+})
+
+```
+
