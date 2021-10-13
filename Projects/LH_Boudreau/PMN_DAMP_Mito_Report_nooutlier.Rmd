@@ -1,0 +1,406 @@
+---
+title: "RNAseq_report_LB20210414"
+author: "Eric Allain"
+date: "April 14th, 2019"
+output: html_document
+fig_width: 8
+fig_height: 8
+fig_align: "center"
+---
+
+#RNA sequencing data report template
+ Setting up your data
+This analysis will require two files, a raw count matrix in tab-seperated format, and a design matrix, also in .tsv format. The count matrix should be organized with sample names as column headers and feature names as row labels. The design matrix should be inverted, with sample labels as row names and phenotype data (Treatment, Sex, Age, Cell line, Tissue, etc.) as column headers. The first column in the design matrix should always be the sample groups which aggregate all technical replicates. Other factors will follow. 
+
+### Dependencies
+```{r dependencies, echo=TRUE, message=FALSE, warning=FALSE}
+library("FactoMineR")
+library("edgeR")
+library("ggplot2")
+library("Biobase")
+library("limma")
+library("gplots")
+library("dplyr")
+library("dendextend")
+library("plotly")
+library("shiny")
+library("MASS")
+library("sva")
+library("tidyr")
+library("gprofiler2")
+```
+
+
+Set your working directory
+
+```{r working_directory}
+#setwd("C:/Users/vrm211/Desktop/Docs/Luc")
+```
+
+Import your raw count data
+
+```{r import_count_data}
+raw_counts <- read.table("counts3.txt", header = TRUE, row.names = 1, stringsAsFactors = F)
+raw_counts <- raw_counts[,-c(1,2,3,4,5)]
+raw_counts <- as.matrix(raw_counts)
+```
+
+Filter out low-abundance transcripts
+
+```{r low_abundance_filtering}
+raw_counts_filt <- raw_counts[rowSums(raw_counts) > 0, ]
+raw_counts_filt <- raw_counts_filt[,-c(1,4,9,12)]
+```
+
+Retrieve associated phenotype data
+
+```{r phenotype_data}
+Pheno1<- read.table("design_matrix1_Luc.txt", header=TRUE, stringsAsFactors = TRUE)
+Pheno1 <- Pheno1[-c(3,8,11),]
+```
+
+Store list of all phenotype data names for exploratory analysis
+```{r store_factors}
+covariables<-colnames(Pheno1)
+```
+
+The DGE object is then created for data analysis
+
+```{r Create_DGE}
+dge <- DGEList(raw_counts_filt)
+```
+
+Set some graphical parameters: add the number of colours which corresponds to the number of experimental conditions. The end argument (each = 3) corresponds to the number of replicates. This could be set to colour graphs based on any variable. In this example we have 9 paired samples (3 experimental conditions in triplicate)
+
+```{r set_graphical_parameters}
+colors=rep(c("dodgerblue","firebrick1","SpringGreen"),each=3)
+```
+
+Raw library size and density plots can then be generated as a quick look for any exessive variability, outliers or technical errors.
+
+
+```{r Raw_data_distributions, echo=FALSE}
+barplot(dge$samples$lib.size,col=colors,main="Raw library size")
+```
+
+transform to log-scale for easier visualization
+
+```{r Log_transfo}
+pseudo_counts <- log2(dge$counts+1)
+```
+
+plot the density distribution for each sample replicate (by=3), fetch graph titles from the main factor column in the phenotype data file (Pheno1).mfrow may need to be changes depending on number of samples. Default can accomodate 9 samples in triplicate (28 columns).This allows us to quickly check for any possible outliers or large changes in data distributions which may bias results.
+
+```{r density_plots, echo=FALSE, fig.align="center", fig.height= 8, fig.width= 8}
+par(mfrow=c(3,1))
+for (i in seq(1,ncol(pseudo_counts),by=3))
+{
+  plot(density(pseudo_counts[,i]),col=colors[i],main=Pheno1$group[i])
+  lines(density(pseudo_counts[,i+1]),lwd=2,col=colors[i+1])
+  lines(density(pseudo_counts[,i+2]),lwd=2,col=colors[i+2])
+}
+```
+
+We can also plot all experimental conditions on one single plot.
+
+```{r all_samples_density}
+i=1
+par (mfrow=c(1,1))
+plot(density(pseudo_counts[,i]),main="Count distribution - all samples",col=colors[i])
+for (i in 2:9)
+  lines(density(pseudo_counts[,i]),lwd=2,col=colors[i])
+```
+
+##Principal component analysis
+Eucledian distance-based methods such as singular vector decomposition (SVD) can then be used to view reduced-dimention data. We can then colour-code datapoints to show trends. Here we can see the variance explained by each principal component. 
+
+First, center the data
+```{r centering}
+pseudo_counts_cen <-pseudo_counts - rowMeans(pseudo_counts)
+```
+
+Now lets see how much variance is explained by each principal component after dimentionnality reduction.
+
+```{r svd, echo = FALSE}
+svd1<-svd(pseudo_counts_cen)
+svd_percent<-(svd1$d^2/sum(svd1$d^2))
+plot(svd_percent,main="% variance explained",col=2)
+```
+
+Then we can colour datapoints by factor levels to observe trends.
+
+```{r Batch_effects, echo=FALSE, fig.align="center", fig.height= 8, fig.width= 8}
+par(mfrow=c(1,2))
+for(item in covariables){
+  plot(svd1$v[,1],svd1$v[,2],ylab="2nd PC",xlab="1st PC",col=as.factor(Pheno1[[item]]), main=item)
+}
+```
+
+##Between sample normalization. 
+In this case the Trimmed mean of M-values (TMM) method is used, which is a robust normalization method for RNAseq data.
+
+```{r Normalized_values}
+dge <- calcNormFactors(dge, method = "TMM")
+pseudo_TMM <- log2(scale(dge$counts,center=FALSE,scale=dge$samples$norm.factors)+1)
+```
+
+Now we can generate our previous plots with normalized data to check that nothing has changed.
+
+```{r distribution_normalized, echo = FALSE}
+i=1
+par (mfrow=c(1,1))
+plot(density(pseudo_TMM[,i]),main="Count distribution - all samples",col=colors[i])
+for (i in 2:9)
+  lines(density(pseudo_TMM[,i]),lwd=2,col=colors[i])
+```
+
+Variance explained by each principal component. 
+
+```{r svd_normalized, echo = FALSE}
+pseudo_counts_cen <-pseudo_TMM - rowMeans(pseudo_TMM)
+svd1<-svd(pseudo_counts_cen)
+svd_percent<-(svd1$d^2/sum(svd1$d^2))
+plot(svd_percent,main="% variance explained",col=2)
+```
+
+Colorize datapoints to match factor levels. 
+There seems to be much variability between donors. In preperation for analysis, I would set alpha to 0.1 in the statistical analysis, given the low number of samples and expected variability between donors. 
+
+```{r factor_levels_norm, fig.align="center", fig.height= 8, fig.width= 8}
+par(mfrow=c(1,2))
+for(item in covariables){
+  plot(svd1$v[,1],svd1$v[,2],ylab="2nd PC",xlab="1st PC",col=as.factor(Pheno1[[item]]), main=item)
+}
+```
+
+
+##Differential gene expression analysis and statistics
+Setting the references is done to constrain our statistical model. 
+We are loking to estimate the parameters which best fit the model, through the maimum likelihood function. The maximum of this function is the best-fit parameter. Multiple maxima for the best-fit function can be found if we don't fix a reference condition, so applying this constraint allows for a reference condition and replicability. Untreated control is the reference value for gene expression in most models.
+
+```{r relevel_factors}
+design<-Pheno1
+factor1 <- relevel(as.factor(design$Tx), ref = "0")
+#factor2 <- relevel(as.factor(design$Tx2), ref = "0")
+```
+
+Make sure to go through each factor in this way to be sure the control condition is appropriately set.
+
+Build the linear model. This is where careful thought should be applied to determine the variables to include. Models can be compared, but avoid overfitting. Contrary to popular belief, subjectivity is key to building the simplest model which best explains the data.
+
+```{r fitting_model}
+design_matrix <- model.matrix(~design$Rep + factor1)
+```
+
+Estimate dispertions, a necessary step to assess gene-level scatter in our data.
+
+```{r dispertion}
+dge <- estimateGLMCommonDisp(dge, design_matrix)
+dge <- estimateGLMTrendedDisp(dge, design_matrix)
+dge <- estimateGLMTagwiseDisp(dge, design_matrix)
+```
+
+Plotting a BCV graph shows us if dispertion is adequately controlled with low-abundance genes. If dispertion is too high, consider using a more stringent cutoff for low-abundance genes.
+
+```{r BCVplot}
+par(mfrow=c(1,1))
+plotBCV(dge, main = paste0("BCV plot"))
+```
+
+Completely arbitraty filtering, anything is good as long as we are increasing the stringency of our threshold.
+
+```{r New_filter}
+ridx <- rowSums(cpm(dge) > 1) >= nrow(design)/2 
+dge.f <- dge[ridx,]
+cat("Number of genes after filtering:", nrow(dge.f$counts),"\n")
+```
+
+Estimate dispertion again using the new filter
+
+```{r Re-run, echo = FALSE}
+dge.f$samples$lib.size<-colSums(dge.f$counts)
+dge.f <- calcNormFactors(dge.f, method = "TMM")
+dge.f <- estimateGLMCommonDisp(dge.f, design_matrix)
+dge.f <- estimateGLMTrendedDisp(dge.f, design_matrix)
+dge.f<- estimateGLMTagwiseDisp(dge.f, design_matrix)
+plotBCV(dge.f, main = paste0("BCV plot"))
+```
+
+By looking at the design matrix colnames(design_matrix), choose the correct coefficient in the model for the desired results.
+
+Fit the model to the data.
+
+```{r model_fit}
+fit.f<-glmFit(dge.f,design_matrix)
+```
+
+Results can be generated afterwards, the 1st coefficient is always intercept, set coefficients to whichever contrast is needed.I find it easier to write this out by hand prior to the analysis. 
+
+```{r LikRatioTest}
+res <- glmLRT(fit.f, coef = 3)
+```
+
+Adjusting for multiple comparisons is essential, and viewing the raw p-value distribution can be a good indicator of the quality of our analysis. 
+
+```{r P_val_distribution}
+pvals<- data.frame(raw.pvalue = res$table$PValue,
+                   FDR=p.adjust(res$table$PValue, "BH"))
+hist(pvals$raw.pvalue,150)
+```
+
+
+If the p-value graph is normal for all contrasts, good, if not, it means that your N is perhaps too weak to include interaction terms or other factors in the model. Prudence in interpretation can be warranted.
+In this case, the hill shape of the P-value distribution indicates that this analysis needs to be corrected for dispersion estimates of the null distribution or adjusted using latent surrogate variables. 
+
+## Correcting the data for unknown sources of variability
+In this case we use the SVAseq function to estimate latent sources of variability and re-plot our PCAs
+
+```{r sva}
+
+#setup for batch correction
+null_matrix <- model.matrix(~ 1, data = as.data.frame(design))
+
+
+##edata is expression counts, mod is mod.matrix
+n.sv = num.sv(dge.f$counts,design_matrix,method="leek")
+
+## mod is the model matrix, mod0 is null model
+svobj = svaseq(dge.f$counts,design_matrix,null_matrix,n.sv=n.sv-1)
+
+
+
+#function for cleaning a count matrix based on latent variables from sva
+cleaningP = function(y, mod, svaobj,  P=ncol(mod)) {
+  X=cbind(mod,svaobj$sv)
+  Hat=solve(t(X)%*%X)%*%t(X)
+  beta=(Hat%*%t(y))
+  cleany=y-t(as.matrix(X[,-c(1:P)])%*%beta[-c(1:P),])
+  return(cleany)
+}
+
+
+#use the clean matrix for PCA analysis
+new_frame <- cleaningP(dge.f$counts, design_matrix, svobj)
+new_frame <- round(new_frame,0)
+pseudo_TMM_nf <- log2(scale(new_frame,center=FALSE,scale=dge.f$samples$norm.factors)+1)
+pseudo_TMM_nf[is.na(pseudo_TMM_nf)] <- 0
+pseudo_TMM_cen_nf <-pseudo_TMM_nf - rowMeans(pseudo_TMM_nf)
+svd2<-svd(pseudo_TMM_cen_nf)
+svd_percent2<-(svd2$d^2/sum(svd2$d^2))
+par(mfrow=c(1,2))
+plot(svd_percent2,main="% variance explained",col=2)
+plot(svd2$v[,1],svd2$v[,2],ylab="2nd PC",xlab="1st PC",col=as.factor(Pheno1$Tx))
+
+```
+
+
+## Re-do DGE
+We re-calculate dispersion as a QC measure using the new design matrix which incorporates the latent variables. 
+```{r do-over}
+
+design_matrix1 <- cbind(design_matrix, svobj$sv)
+dge.f <- estimateGLMCommonDisp(dge.f, design_matrix1)
+dge.f <- estimateGLMTrendedDisp(dge.f, design_matrix1)
+dge.f <- estimateGLMTagwiseDisp(dge.f, design_matrix1)
+par(mfrow=c(1,1))
+plotBCV(dge.f, main = paste0("BCV plot"))
+fit<-glmFit(dge.f,design_matrix1)
+res_DAMP <- glmLRT(fit, coef = 3)
+
+
+```
+
+
+
+## Extracting results
+Here we re-plot the p-value distribution to check if it has an acceptable shape. We see that it follows the null distribution, therefore not very many genes seem to be affected by DAMPs in this experiment. Only two significant genes are found. 
+```{r results}
+res_D<-topTags(res_DAMP,nrow(dge.f$counts))
+pvals<- data.frame(raw.pvalue = res_D$table$PValue,
+                   FDR=p.adjust(res_D$table$PValue, "BH"))
+hist(pvals$raw.pvalue,150)
+
+
+alpha=0.1
+```
+
+## Retrieving only the statistically significant results
+
+```{r signif_results}
+DEGs<-res_D$table[res_D$table$FDR<=alpha,]
+table(sign(DEGs$logFC))
+```
+
+
+## For Mitochondria
+We repeat using the appropriate contrast for Mitochondria-treated PMNs. 
+Here the results are much clearer, we see a large number of significant hits for the Mito-PMN condition. 
+
+```{r}
+res_MITO <- glmLRT(fit, coef = 4)
+res_M<-topTags(res_MITO,nrow(dge.f$counts))
+alpha=0.1
+pvals<- data.frame(raw.pvalue = res_M$table$PValue,
+                   FDR=p.adjust(res_M$table$PValue, "BH"))
+hist(pvals$raw.pvalue,150)
+
+DEGs_mito<-res_M$table[res_M$table$FDR<=alpha,]
+table(sign(DEGs_mito$logFC))
+
+```
+## Change IDs and get tophits
+
+```{r formatids}
+
+res_Df<- res_D$table
+res_Df$HGNC <- rownames(res_Df)
+res_Df<- res_Df %>% separate(HGNC, c("gene", "version"),"[.]")
+rownames(res_Df) <- res_Df$gene
+res_Df<- res_Df[,-c(7,6)]
+gc1<- gconvert(query=rownames(res_Df), organism="hsapiens", target="HGNC", mthreshold=1, filter_na = TRUE)
+res_Df$Gene_name <- gc1$target
+res_Df$Description <- gc1$description
+
+res_Mf<- res_M$table
+res_Mf$HGNC <- rownames(res_Mf)
+res_Mf<- res_Mf %>% separate(HGNC, c("gene", "version"),"[.]")
+rownames(res_Mf) <- res_Mf$gene
+res_Mf<- res_Mf[,-c(7,6)]
+gc1<- gconvert(query=rownames(res_Mf), organism="hsapiens", target="HGNC", mthreshold=1, filter_na = TRUE)
+res_Mf$Gene_name <- gc1$target
+res_Mf$Description <- gc1$description
+
+
+```
+
+
+
+### Interactive Volcano Plots
+We can plot these differences interactively in a plotly object. 
+```{r Volcano_DAMP,fig.align="center", fig.height= 8, fig.width= 8}
+res_Df$threshold<-ifelse(res_Df$FDR < alpha, "FDR < 0.1", "N.S.")
+res_Df$threshold<-as.factor(res_Df$threshold)
+volcano_dat<-res_Df
+volcano_dat$name<-res_Df$Gene_name
+p <- plot_ly(volcano_dat, x = ~logFC, y = ~-log10(FDR), type = "scatter", mode = "markers", color = volcano_dat$threshold, text = volcano_dat$name)
+p
+```
+
+
+## Now for Mitoochondria
+
+```{r Volcano_Mito,fig.align="center", fig.height= 8, fig.width= 8}
+res_Mf$threshold<-ifelse(res_Mf$FDR < alpha, "FDR < 0.1", "N.S.")
+res_Mf$threshold<-as.factor(res_Mf$threshold)
+volcano_dat<-res_Mf
+volcano_dat$name<-res_Mf$Gene_name
+p <- plot_ly(volcano_dat, x = ~logFC, y = ~-log10(FDR), type = "scatter", mode = "markers", color = volcano_dat$threshold, text = volcano_dat$name)
+p
+```
+
+
+## Session information
+
+```{r sessinfo}
+sessionInfo()
+```
